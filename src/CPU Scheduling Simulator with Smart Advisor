@@ -1,0 +1,472 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from collections import deque
+import matplotlib.colors as mcolors
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# ==========================================
+# BACKEND LOGIC: SCHEDULING ALGORITHMS
+# ==========================================
+def finalize_results(algo_name, processes, completion, timeline):
+    """Calculates metrics, formats the output dictionary, and includes the execution timeline."""
+    n = len(processes)
+    if n == 0: return None
+    
+    details = []
+    total_tat, total_wt = 0, 0
+    
+    for i in range(n):
+        tat = completion[i] - processes[i]["arrival"]
+        wt = tat - processes[i]["burst"]
+        total_tat += tat
+        total_wt += wt
+        
+        process_result = processes[i].copy()
+        process_result.update({
+            "completion_time": completion[i],
+            "turnaround_time": tat,
+            "waiting_time": wt
+        })
+        details.append(process_result)
+        
+    return {
+        "algorithm": algo_name,
+        "details": details,
+        "avg_turnaround": round(total_tat / n, 2),
+        "avg_waiting": round(total_wt / n, 2),
+        "timeline": timeline
+    }
+
+def fcfs(process_list):
+    sorted_proc = sorted(process_list, key=lambda x: x["arrival"])
+    n = len(sorted_proc)
+    completion = [0] * n
+    timeline = []
+    current_time = 0
+    
+    for i in range(n):
+        if current_time < sorted_proc[i]["arrival"]:
+            current_time = sorted_proc[i]["arrival"]
+        
+        start_time = current_time
+        current_time += sorted_proc[i]["burst"]
+        completion[i] = current_time
+        
+        timeline.append({"id": sorted_proc[i]["id"], "start": start_time, "end": current_time})
+        
+    return finalize_results("FCFS", sorted_proc, completion, timeline)
+
+def sjf_preemptive(process_list):
+    sorted_proc = sorted(process_list, key=lambda x: x["arrival"])
+    n = len(sorted_proc)
+    remaining_burst = [p["burst"] for p in sorted_proc]
+    completion = [0] * n
+    timeline = []
+    
+    current_time = 0
+    completed = 0
+    last_proc_id = None
+    segment_start = 0
+    
+    while completed < n:
+        available = [i for i in range(n) if sorted_proc[i]["arrival"] <= current_time and remaining_burst[i] > 0]
+        
+        if not available:
+            if last_proc_id is not None:
+                timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+                last_proc_id = None
+            current_time = min(sorted_proc[i]["arrival"] for i in range(n) if remaining_burst[i] > 0)
+            continue
+            
+        selected = min(available, key=lambda x: (remaining_burst[x], sorted_proc[x]["arrival"]))
+        
+        if sorted_proc[selected]["id"] != last_proc_id:
+            if last_proc_id is not None:
+                timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+            last_proc_id = sorted_proc[selected]["id"]
+            segment_start = current_time
+            
+        remaining_burst[selected] -= 1
+        current_time += 1
+        
+        if remaining_burst[selected] == 0:
+            completion[selected] = current_time
+            completed += 1
+            
+    if last_proc_id is not None:
+        timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+        
+    return finalize_results("SJF (Preemptive)", sorted_proc, completion, timeline)
+
+def priority_preemptive(process_list):
+    sorted_proc = sorted(process_list, key=lambda x: x["arrival"])
+    n = len(sorted_proc)
+    remaining_burst = [p["burst"] for p in sorted_proc]
+    completion = [0] * n
+    timeline = []
+    
+    current_time = 0
+    completed = 0
+    last_proc_id = None
+    segment_start = 0
+    
+    while completed < n:
+        available = [i for i in range(n) if sorted_proc[i]["arrival"] <= current_time and remaining_burst[i] > 0]
+        
+        if not available:
+            if last_proc_id is not None:
+                timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+                last_proc_id = None
+            current_time = min(sorted_proc[i]["arrival"] for i in range(n) if remaining_burst[i] > 0)
+            continue
+            
+        selected = min(available, key=lambda x: (sorted_proc[x]["priority"], sorted_proc[x]["arrival"]))
+        
+        if sorted_proc[selected]["id"] != last_proc_id:
+            if last_proc_id is not None:
+                timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+            last_proc_id = sorted_proc[selected]["id"]
+            segment_start = current_time
+            
+        remaining_burst[selected] -= 1
+        current_time += 1
+        
+        if remaining_burst[selected] == 0:
+            completion[selected] = current_time
+            completed += 1
+            
+    if last_proc_id is not None:
+        timeline.append({"id": last_proc_id, "start": segment_start, "end": current_time})
+        
+    return finalize_results("Priority (Preemptive)", sorted_proc, completion, timeline)
+
+def round_robin(process_list, time_quantum):
+    processes = sorted(process_list, key=lambda x: x["arrival"])
+    n = len(processes)
+    remaining_burst = [p["burst"] for p in processes]
+    completion = [0] * n
+    timeline = []
+    
+    current_time = 0
+    completed = 0
+    ready_queue = deque()
+    visited = [False] * n
+    
+    def add_to_queue():
+        for i in range(n):
+            if processes[i]["arrival"] <= current_time and not visited[i]:
+                ready_queue.append(i)
+                visited[i] = True
+                
+    add_to_queue()
+    if not ready_queue and completed < n:
+        current_time = processes[0]["arrival"]
+        add_to_queue()
+
+    while completed < n:
+        idx = ready_queue.popleft()
+        execute_time = min(time_quantum, remaining_burst[idx])
+        
+        start_time = current_time
+        remaining_burst[idx] -= execute_time
+        current_time += execute_time
+        
+        timeline.append({"id": processes[idx]["id"], "start": start_time, "end": current_time})
+        
+        add_to_queue()
+        
+        if remaining_burst[idx] > 0:
+            ready_queue.append(idx)
+        else:
+            completion[idx] = current_time
+            completed += 1
+            
+        if not ready_queue and completed < n:
+            current_time = min(p["arrival"] for i, p in enumerate(processes) if not visited[i])
+            add_to_queue()
+            
+    return finalize_results("Round Robin", processes, completion, timeline)
+
+class SmartAdvisor:
+    @staticmethod
+    def analyze(process_list):
+        if not process_list:
+            return None
+            
+        burst_times = [p["burst"] for p in process_list]
+        priorities = [p.get("priority", 0) for p in process_list]
+        arrival_times = [p["arrival"] for p in process_list]
+        
+        total_burst = sum(burst_times)
+        avg_burst = total_burst / len(process_list)
+        
+        variance = sum((x - avg_burst) ** 2 for x in burst_times) / len(process_list)
+        has_distinct_priorities = len(set(priorities)) > 1
+        all_arrive_together = len(set(arrival_times)) == 1
+
+        reasoning = []
+        recommendation = ""
+
+        if has_distinct_priorities:
+            recommendation = "Priority (Preemptive)"
+            reasoning.append("The process batch contains explicit, distinct priority structures that must be enforced by the OS.")
+        elif variance > 15 and not all_arrive_together:
+            recommendation = "SJF (Preemptive)"
+            reasoning.append("There is high variance in job lengths. Running short jobs first minimizes overall average waiting time.")
+        elif all_arrive_together and variance < 3:
+            recommendation = "FCFS"
+            reasoning.append("Processes arrive simultaneously and feature uniform burst times. Simple First-Come, First-Served minimizes overhead.")
+        else:
+            recommendation = "Round Robin"
+            reasoning.append("Standard mixed workload observed. Round Robin guarantees fairness and prevents process starvation via time slicing.")
+            
+        return {"recommended_algorithm": recommendation, "analysis": " ".join(reasoning)}
+
+
+# ==========================================
+# FRONTEND LOGIC: UI INTEGRATION
+# ==========================================
+
+root = tk.Tk()
+root.title("CPU Scheduling Simulator with Smart Advisor")
+root.geometry("1050x950")
+root.resizable(False, False)
+
+process_entries = []
+current_canvas = None # Keeps track of the matplotlib chart
+
+def draw_gantt_chart(timeline, parent_frame):
+    global current_canvas
+    if current_canvas:
+        current_canvas.get_tk_widget().destroy()
+
+    if not timeline:
+        return
+
+    # Create the figure
+    fig = Figure(figsize=(10, 2), dpi=100)
+    ax = fig.add_subplot(111)
+
+    colors = list(mcolors.TABLEAU_COLORS.values())
+    proc_colors = {}
+    color_idx = 0
+    max_time = 0
+
+    # Draw the bars
+    for entry in timeline:
+        pid = entry["id"]
+        if pid not in proc_colors:
+            proc_colors[pid] = colors[color_idx % len(colors)]
+            color_idx += 1
+            
+        start = entry["start"]
+        end = entry["end"]
+        duration = end - start
+        max_time = max(max_time, end)
+
+        ax.barh(0, duration, left=start, color=proc_colors[pid], edgecolor='black')
+        # Add process text inside the bar
+        ax.text(start + duration/2, 0, pid, ha='center', va='center', color='white', fontweight='bold')
+
+    ax.set_yticks([])
+    ax.set_xlim(0, max_time)
+    ax.set_xlabel("Time Units")
+    ax.set_title("Execution Gantt Chart", fontweight='bold')
+    
+    # Set xticks properly based on timeline starts and ends
+    ticks = sorted(list(set([entry["start"] for entry in timeline] + [entry["end"] for entry in timeline])))
+    ax.set_xticks(ticks)
+    
+    fig.tight_layout()
+
+    # Embed in Tkinter
+    current_canvas = FigureCanvasTkAgg(fig, master=parent_frame)
+    current_canvas.draw()
+    current_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+def generate_inputs():
+    for widget in input_frame.grid_slaves():
+        if int(widget.grid_info()["row"]) > 0:
+            widget.destroy()
+    process_entries.clear()
+    
+    try:
+        n = int(num_process.get())
+        if n <= 0: raise ValueError
+            
+        for i in range(n):
+            tk.Label(input_frame, text=f"P{i+1}").grid(row=i+1, column=0, pady=2)
+            
+            arr_ent = tk.Entry(input_frame, width=15)
+            arr_ent.insert(0, "0") # Default values for faster testing
+            arr_ent.grid(row=i+1, column=1, pady=2)
+            
+            burst_ent = tk.Entry(input_frame, width=15)
+            burst_ent.grid(row=i+1, column=2, pady=2)
+            
+            prio_ent = tk.Entry(input_frame, width=15)
+            prio_ent.insert(0, "0")
+            prio_ent.grid(row=i+1, column=3, pady=2)
+            
+            process_entries.append({"id": f"P{i+1}", "arrival": arr_ent, "burst": burst_ent, "priority": prio_ent})
+    except ValueError:
+        messagebox.showerror("Invalid Input", "Please enter a valid positive integer for the number of processes.")
+
+def clear_ui():
+    num_process.delete(0, tk.END)
+    quantum_entry.delete(0, tk.END)
+    for widget in input_frame.grid_slaves():
+        if int(widget.grid_info()["row"]) > 0:
+            widget.destroy()
+    process_entries.clear()
+    recommend_box.delete("1.0", tk.END)
+    analysis_box.delete("1.0", tk.END)
+    avg_wait.config(text="__________")
+    avg_turn.config(text="__________")
+    for row in tree.get_children():
+        tree.delete(row)
+    global current_canvas
+    if current_canvas:
+        current_canvas.get_tk_widget().destroy()
+        current_canvas = None
+
+def extract_process_data():
+    data = []
+    try:
+        for p in process_entries:
+            burst_val = int(p["burst"].get())
+            if burst_val <= 0:
+                raise ValueError("Burst time must be > 0")
+            data.append({
+                "id": p["id"],
+                "arrival": int(p["arrival"].get()),
+                "burst": burst_val,
+                "priority": int(p["priority"].get()) if p["priority"].get() else 0 
+            })
+        if not data:
+            messagebox.showwarning("No Data", "Please generate and fill process data first.")
+            return None
+        return data
+    except ValueError as e:
+        messagebox.showerror("Invalid Data", "Ensure all Arrival and Burst times are valid numbers. Burst must be > 0.")
+        return None
+
+def simulate_action():
+    data = extract_process_data()
+    if not data: return
+    
+    selected_algo = algorithm.get()
+    result = None
+    
+    if selected_algo == "FCFS":
+        result = fcfs(data)
+    elif selected_algo == "SJF (Preemptive)":
+        result = sjf_preemptive(data)
+    elif selected_algo == "Priority (Preemptive)":
+        result = priority_preemptive(data)
+    elif selected_algo == "Round Robin":
+        try:
+            tq = int(quantum_entry.get())
+            if tq <= 0: raise ValueError
+            result = round_robin(data, tq)
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid positive integer for Time Quantum.")
+            return
+            
+    if result:
+        # Populate Treeview
+        for row in tree.get_children():
+            tree.delete(row)
+        for p in result["details"]:
+            tree.insert("", "end", values=(p["id"], p["arrival"], p["burst"], p["waiting_time"], p["turnaround_time"]))
+        
+        # Populate Metrics
+        avg_wait.config(text=f"{result['avg_waiting']} units")
+        avg_turn.config(text=f"{result['avg_turnaround']} units")
+        
+        # Render Chart
+        draw_gantt_chart(result["timeline"], chart_frame)
+
+def run_advisor():
+    data = extract_process_data()
+    if not data: return
+    
+    advice = SmartAdvisor.analyze(data)
+    if advice:
+        recommend_box.delete("1.0", tk.END)
+        recommend_box.insert("1.0", advice["recommended_algorithm"])
+        analysis_box.delete("1.0", tk.END)
+        analysis_box.insert("1.0", advice["analysis"])
+
+# ==========================================
+# UI LAYOUT BUILDING
+# ==========================================
+title = tk.Label(root, text="CPU SCHEDULING SIMULATOR WITH SMART ADVISOR", font=("Arial", 16, "bold"))
+title.pack(pady=10)
+
+algo_frame = tk.LabelFrame(root, text="Scheduling Algorithm", padx=10, pady=5)
+algo_frame.pack(fill="x", padx=10, pady=5)
+algorithm = tk.StringVar()
+algo_combo = ttk.Combobox(algo_frame, textvariable=algorithm, state="readonly", values=["FCFS", "SJF (Preemptive)", "Priority (Preemptive)", "Round Robin"], width=40)
+algo_combo.current(0)
+algo_combo.grid(row=0, column=0, padx=5, pady=5)
+
+process_frame = tk.Frame(root)
+process_frame.pack(fill="x", padx=10, pady=5)
+tk.Label(process_frame, text="Number of Processes:").grid(row=0, column=0, padx=5)
+num_process = tk.Entry(process_frame, width=10)
+num_process.grid(row=0, column=1, padx=5)
+generate_btn = tk.Button(process_frame, text="Generate Inputs", width=15, command=generate_inputs, bg="#e0e0e0")
+generate_btn.grid(row=0, column=2, padx=10)
+
+input_frame = tk.LabelFrame(root, text="PROCESS DATA")
+input_frame.pack(fill="x", padx=10, pady=5)
+for col, header in enumerate(["Process ID", "Arrival Time", "Burst Time", "Priority"]):
+    tk.Label(input_frame, text=header, font=("Arial", 10, "bold"), width=15).grid(row=0, column=col)
+
+rr_frame = tk.LabelFrame(root, text="Time Quantum (Round Robin Only)")
+rr_frame.pack(fill="x", padx=10, pady=5)
+quantum_entry = tk.Entry(rr_frame, width=15)
+quantum_entry.pack(pady=5)
+
+control_frame = tk.LabelFrame(root, text="CONTROLS")
+control_frame.pack(fill="x", padx=10, pady=5)
+simulate_btn = tk.Button(control_frame, text="SIMULATE", width=15, command=simulate_action, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"))
+simulate_btn.grid(row=0, column=0, padx=15, pady=10)
+advisor_btn = tk.Button(control_frame, text="SMART ADVISOR", width=15, command=run_advisor, bg="#2196F3", fg="white", font=("Arial", 10, "bold"))
+advisor_btn.grid(row=0, column=1, padx=15)
+clear_btn = tk.Button(control_frame, text="CLEAR", width=15, command=clear_ui)
+clear_btn.grid(row=0, column=2, padx=15)
+exit_btn = tk.Button(control_frame, text="EXIT", width=15, command=root.destroy, bg="#f44336", fg="white", font=("Arial", 10, "bold"))
+exit_btn.grid(row=0, column=3, padx=15)
+
+advisor_frame = tk.LabelFrame(root, text="SMART ADVISOR OUTPUT")
+advisor_frame.pack(fill="x", padx=10, pady=5)
+tk.Label(advisor_frame, text="Recommended Algorithm:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10)
+recommend_box = tk.Text(advisor_frame, height=1, width=100, font=("Arial", 10))
+recommend_box.pack(padx=10, pady=2)
+tk.Label(advisor_frame, text="Analysis:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10)
+analysis_box = tk.Text(advisor_frame, height=2, width=100, font=("Arial", 10))
+analysis_box.pack(padx=10, pady=2)
+
+results_frame = tk.LabelFrame(root, text="SIMULATION METRICS & RESULTS")
+results_frame.pack(fill="both", expand=True, padx=10, pady=5)
+tk.Label(results_frame, text="Avg Waiting Time:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky="w", padx=10)
+avg_wait = tk.Label(results_frame, text="__________")
+avg_wait.grid(row=0, column=1, sticky="w")
+tk.Label(results_frame, text="Avg Turnaround Time:", font=("Arial", 10, "bold")).grid(row=1, column=0, sticky="w", padx=10)
+avg_turn = tk.Label(results_frame, text="__________")
+avg_turn.grid(row=1, column=1, sticky="w")
+
+columns = ("Process", "Arrival Time", "Burst Time", "Waiting Time", "Turnaround Time")
+tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=5)
+for col in columns:
+    tree.heading(col, text=col)
+    tree.column(col, width=120)
+tree.grid(row=2, column=0, columnspan=5, padx=10, pady=5)
+
+chart_frame = tk.Frame(results_frame, height=150)
+chart_frame.grid(row=3, column=0, columnspan=5, sticky="ew", padx=10, pady=5)
+
+root.mainloop()
