@@ -1,45 +1,66 @@
-class SmartAdvisor:
-    @staticmethod
-    def analyze(process_list, user_tq=None):
-        if not process_list: return None
+def draw_chart(timeline):
+    global ax, fig, canvas_widget
+    ax.clear()
+    
+    c_bg = "#1E293B" if is_dark_mode else "#FFFFFF"
+    c_text = "#F8FAFC" if is_dark_mode else "#1E293B"
+    c_grid = "#94A3B8" if is_dark_mode else "#64748B"
+    
+    fig.patch.set_facecolor(c_bg)
+    ax.set_facecolor(c_bg)
+    
+    for spine in ['top', 'right', 'left']: 
+        ax.spines[spine].set_visible(False)
+    ax.spines['bottom'].set_color(c_text)
+    ax.tick_params(axis='x', colors=c_text)
+    
+    if not timeline: 
+        ax.set_yticks([])
+        ax.set_xticks([]) 
+        ax.spines['bottom'].set_visible(False) 
+        canvas_widget.draw()
+        return
+    else:
+        ax.spines['bottom'].set_visible(True) 
+    
+    distinct_colors = [
+        "#EF4444", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#06B6D4", "#EC4899", "#84CC16",
+        "#14B8A6", "#F97316", "#6366F1", "#A855F7", "#D946EF", "#059669", "#DC2626", "#2563EB"
+    ]
+    
+    max_time = 0
+    for t in timeline:
+        pid = t["id"]
+        duration = t["end"] - t["start"]
         
-        if user_tq:
-            tq = user_tq
+        if pid == "IDLE":                 <---
+            color = "#475569" if is_dark_mode else "#CBD5E1"
+            label_text = "IDLE"
+            text_color = "#94A3B8" if is_dark_mode else "#64748B"
         else:
-            bursts = [p["burst"] for p in process_list]
-            mean_burst = sum(bursts) / len(bursts)
-            tq = max(2, int(mean_burst * 0.8))
-        
-        results = {
-            "FCFS": fcfs(process_list),
-            "SJF": sjf_non_preemptive(process_list),
-            "Priority": priority_non_preemptive(process_list),
-            "Round Robin": round_robin(process_list, tq)
-        }
-        
-        scores = {}
-        for algo, res in results.items():
-            awt = res["avg_waiting"]
-            atat = res["avg_turnaround"]
+            try:
+                idx = int(pid[1:]) - 1
+                color = distinct_colors[idx % len(distinct_colors)]
+            except ValueError:
+                color = "#888888" 
+            label_text = pid
+            text_color = "white"
             
-            penalty = 0                   <---
-            if algo == "Round Robin": penalty += 1.5
-            if algo == "Priority": penalty += 2.5 
-                
-            scores[algo] = (awt * 0.6) + (atat * 0.4) + penalty
+        ax.barh(0, duration, left=t["start"], color=color, edgecolor=c_bg, linewidth=1.5, height=0.6, zorder=3) <---
+        
+        if duration > max_time * 0.02 or len(timeline) < 15:  
+            ax.text(t["start"] + duration/2, 0, label_text, ha='center', va='center', color=text_color, fontweight='bold', fontsize=10, zorder=4)
             
-        best_algo = min(scores, key=lambda k: scores[k]) <---
+        max_time = max(max_time, t["end"])
         
-        reasons = {
-            "FCFS": "FCFS was chosen because the batch processes arrived sequentially without burst-time variance, neutralizing Convoy Effects.",
-            "SJF": f"SJF optimized the system with a minimal Turnaround matrix ({results['SJF']['avg_turnaround']} MS), giving the fastest overall job clearance.",
-            "Priority": "Priority execution minimized layout latency for tasks marked critically relevant by infrastructure rules.",
-            "Round Robin": f"Round Robin (TQ={tq} MS) achieved optimal response equity and prevented high burst processes from stalling shorter tasks."
-        }
-        
-        return {
-            "recommended_algorithm": best_algo,
-            "analysis": reasons[best_algo],
-            "time_quantum": tq,
-            "all_results": results
-        }
+    ax.set_yticks([])
+    ax.set_xlim(0, max_time)
+    
+    xticks = sorted(list(set([t["start"] for t in timeline] + [t["end"] for t in timeline])))
+    ax.set_xticks(xticks)
+    
+    ax.set_xticklabels(xticks, fontsize=10, fontweight='bold', color=c_text) 
+    ax.set_xlabel("Timeline Units (MS)", fontsize=11, fontweight='bold', color=c_text, labelpad=5)
+    ax.grid(axis='x', linestyle=':', alpha=0.5, color=c_grid, zorder=0)
+    fig.subplots_adjust(bottom=0.3, top=0.9, left=0.05, right=0.95)
+    canvas_widget.draw()
