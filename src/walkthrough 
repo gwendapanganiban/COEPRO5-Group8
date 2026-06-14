@@ -1,0 +1,45 @@
+def round_robin(process_list, tq):
+    procs = sorted(process_list, key=lambda x: x["arrival"])
+    n = len(procs); remaining = [p["burst"] for p in procs]
+    completion = [0]*n; timeline = []; current_time = 0; completed = 0
+    queue = deque(); visited = [False]*n  <---
+    
+    def add_to_queue():
+        for i in range(n):
+            if procs[i]["arrival"] <= current_time and not visited[i]: 
+                queue.append(i); visited[i] = True
+                
+    add_to_queue()
+    if not queue and completed < n: 
+        next_arrival = min(p["arrival"] for i, p in enumerate(procs) if not visited[i])
+        timeline.append({"id": "IDLE", "start": current_time, "end": next_arrival})
+        current_time = next_arrival
+        add_to_queue()
+        
+    while completed < n:
+        if queue:
+            idx = queue.popleft()
+            start = current_time
+            exe = min(tq, remaining[idx]) 
+            remaining[idx] -= exe         <---
+            current_time += exe
+            
+            if timeline and timeline[-1]["id"] == procs[idx]["id"] and timeline[-1]["end"] == start:
+                timeline[-1]["end"] = current_time
+            else:
+                timeline.append({"id": procs[idx]["id"], "start": start, "end": current_time})
+            
+            add_to_queue()
+            
+            if remaining[idx] > 0: 
+                queue.append(idx) 
+            else: 
+                completion[idx] = current_time
+                completed += 1
+        else:
+            next_arrival = min(p["arrival"] for i, p in enumerate(procs) if not visited[i])
+            timeline.append({"id": "IDLE", "start": current_time, "end": next_arrival})
+            current_time = next_arrival
+            add_to_queue()
+            
+    return finalize_results("Round Robin", procs, completion, timeline)
